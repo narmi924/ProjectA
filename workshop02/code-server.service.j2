@@ -1,0 +1,15 @@
+[Unit]
+Description=Workshop 5 code-server
+After=network.target
+
+[Service]
+User=code-server
+Group=code-server
+StateDirectory=code-server
+WorkingDirectory=/var/lib/code-server
+EnvironmentFile=/etc/code-server/workshop.env
+ExecStart=/usr/bin/code-server --bind-addr 127.0.0.1:8080 --auth password --user-data-dir /var/lib/code-server
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

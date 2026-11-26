@@ -1,0 +1,88 @@
+- name: Deploy the Workshop 5 browser IDE
+  hosts: codeserver
+  become: true
+  vars:
+    codeserver_version: "4.146.0"
+    codeserver_package: "code-server_{{ codeserver_version }}_amd64.deb"
+    codeserver_release: "https://github.com/coder/code-server/releases/download/v{{ codeserver_version }}"
+    codeserver_password: "{{ lookup('ansible.builtin.env', 'CODESERVER_PASSWORD') }}"
+  tasks:
+    - name: Require the controller's workshop password
+      ansible.builtin.assert:
+        that: "codeserver_password is match('^[A-Za-z0-9_-]{20,128}$')"
+        fail_msg: Set CODESERVER_PASSWORD to a random 20-128 character URL-safe password.
+
+    - name: Install Nginx and Debian package tools
+      ansible.builtin.apt:
+        name: [nginx, xz-utils]
+        update_cache: true
+        lock_timeout: 180
+
+    - name: Download the code-server Debian package
+      ansible.builtin.get_url:
+        url: "{{ codeserver_release }}/{{ codeserver_package }}"
+        dest: "/var/cache/apt/archives/{{ codeserver_package }}"
+        checksum: sha256:e4825ae7afb441dfa63a4f579c121569de7c7958d2f35c3d18d803c8a3c7018f
+        mode: "0644"
+
+    - name: Install code-server
+      ansible.builtin.apt:
+        deb: "/var/cache/apt/archives/{{ codeserver_package }}"
+
+    - name: Create the unprivileged editor account
+      ansible.builtin.user:
+        name: code-server
+        system: true
+        create_home: true
+        home: /var/lib/code-server
+        shell: /bin/bash
+
+    - name: Create the private service environment directory
+      ansible.builtin.file:
+        path: /etc/code-server
+        state: directory
+        mode: "0700"
+
+    - name: Set the editor password
+      ansible.builtin.copy:
+        dest: /etc/code-server/workshop.env
+        content: "PASSWORD={{ codeserver_password }}\n"
+        mode: "0600"
+      no_log: true
+      notify: Restart code-server
+
+    - name: Configure the code-server systemd service
+      ansible.builtin.template:
+        src: code-server.service.j2
+        dest: /lib/systemd/system/code-server.service
+        mode: "0644"
+      notify: Restart code-server
+
+    - name: Configure Nginx to proxy the domain and the public IP
+      ansible.builtin.template:
+        src: code-server.conf.j2
+        dest: /etc/nginx/sites-available/code-server.conf
+        mode: "0644"
+      notify: Restart Nginx
+
+    - name: Enable the code-server site
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/code-server.conf
+        dest: /etc/nginx/sites-enabled/code-server.conf
+        state: link
+      notify: Restart Nginx
+
+  handlers:
+    - name: Restart code-server
+      ansible.builtin.systemd:
+        name: code-server
+        daemon_reload: true
+        enabled: true
+        state: restarted
+
+    - name: Restart Nginx
+      ansible.builtin.systemd:
+        name: nginx
+        daemon_reload: true
+        enabled: true
+        state: restarted
